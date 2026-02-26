@@ -48,11 +48,8 @@ def main() -> None:
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
 
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-
     # block
-    t.join()
+    httpd.serve_forever()
 
 
 if __name__ == "__main__":

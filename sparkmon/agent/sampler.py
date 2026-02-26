@@ -56,25 +56,34 @@ class Sampler:
         except Exception:
             pass
 
+        # prime per-process cpu_percent deltas (used for "top CPU")
+        self._top_cpu_primed = False
+
     def _update_top(self) -> None:
         now = time.time()
         if (now - self._last_top_t) < self.config.top_every_s:
             return
         self._last_top_t = now
 
-        # Top CPU: percent over very short interval. Avoid heavy per-proc sampling.
-        # We do a quick per-proc cpu_percent(None) which uses cached deltas.
-        try:
-            for p in psutil.process_iter():
-                try:
-                    p.cpu_percent(interval=None)
-                except Exception:
-                    continue
-            time.sleep(0.05)
-        except Exception:
-            pass
+        # Top CPU:
+        # psutil needs two samples to compute cpu_percent deltas.
+        # We do a single warm-up pass the first time, then on subsequent runs we
+        # read deltas without sleeping.
+        if not self._top_cpu_primed:
+            try:
+                for p in psutil.process_iter():
+                    try:
+                        p.cpu_percent(interval=None)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            self._top_cpu_primed = True
+            cpu_pid, cpu_name, cpu_val = (None, None, None)
+        else:
+            cpu_pid, cpu_name, cpu_val = _top_process_by(lambda p: p.cpu_percent(interval=None))
 
-        cpu_pid, cpu_name, cpu_val = _top_process_by(lambda p: p.cpu_percent(interval=None))
+        # Top MEM (single-pass)
         mem_pid, mem_name, mem_val = _top_process_by(lambda p: p.memory_percent())
 
         top_gpu = self.nvml.top_gpu_process(sample_window_ms=int(self.config.top_every_s * 1000))
@@ -102,7 +111,7 @@ class Sampler:
         return {
             "ts": time.time(),
             "host": socket.gethostname(),
-            "ip": self._best_ip(),
+            "ip": self._best_ip_cached(),
             "uptime_s": time.time() - psutil.boot_time(),
             "cpu_percent": float(cpu),
             "mem": {
@@ -114,10 +123,23 @@ class Sampler:
             **self._top_cache,
         }
 
+    def _best_ip_cached(self) -> Optional[str]:
+        # Cache IP to avoid recomputing net interfaces every request.
+        now = time.time()
+        ttl_s = 60.0
+        last_t = getattr(self, "_ip_cache_t", 0.0)
+        if (now - last_t) < ttl_s:
+            return getattr(self, "_ip_cache_v", None)
+
+        ip = self._best_ip()
+        setattr(self, "_ip_cache_t", now)
+        setattr(self, "_ip_cache_v", ip)
+        return ip
+
     def _best_ip(self) -> Optional[str]:
         # Lightweight best-effort. Prefer non-loopback IPv4.
         try:
-            for ifname, addrs in psutil.net_if_addrs().items():
+            for _ifname, addrs in psutil.net_if_addrs().items():
                 for a in addrs:
                     if getattr(a, "family", None) == socket.AF_INET:
                         ip = a.address

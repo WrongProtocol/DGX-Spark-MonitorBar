@@ -183,14 +183,19 @@ class SparkMonBar:
         self.data_lock = threading.Lock()
         self.latest: List[Tuple[float, Optional[Dict[str, Any]]]] = [(0.0, None) for _ in agents]
 
-        self._position_bottom_bar()
+        self._position_bottom_bar(force=True)
         self._kick_poll_threads()
         self._ui_tick()
+        self._geom_tick()
 
-    def _position_bottom_bar(self) -> None:
+    def _position_bottom_bar(self, force: bool = False) -> None:
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
+        key = (sw, sh, self.height_px)
+        if (not force) and getattr(self, "_last_geom_key", None) == key:
+            return
+        self._last_geom_key = key
         y = sh - self.height_px
         self.root.geometry(f"{sw}x{self.height_px}+0+{y}")
 
@@ -224,9 +229,12 @@ class SparkMonBar:
             else:
                 self.panes[i].update_from_payload(self.agents[i], payload, stale=stale)
 
-        # re-position in case resolution changes
-        self._position_bottom_bar()
         self.root.after(250, self._ui_tick)
+
+    def _geom_tick(self) -> None:
+        # Geometry checks are cheap but don't need to run at UI framerate.
+        self._position_bottom_bar(force=False)
+        self.root.after(2000, self._geom_tick)
 
     def run(self) -> None:
         self.root.mainloop()
