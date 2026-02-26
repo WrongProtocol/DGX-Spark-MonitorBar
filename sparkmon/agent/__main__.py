@@ -10,6 +10,7 @@ from sparkmon.agent.sampler import Sampler
 
 
 class Handler(BaseHTTPRequestHandler):
+    # Set this before the server starts.
     sampler: Sampler
 
     def _send_json(self, code: int, payload: Dict[str, Any]) -> None:
@@ -41,13 +42,11 @@ def main() -> None:
     args = ap.parse_args()
 
     sampler = Sampler()
+    # IMPORTANT: BaseHTTPRequestHandler begins handling inside __init__.
+    # So we must attach the sampler *before* instances are created.
+    Handler.sampler = sampler
 
-    def handler_factory(*_args, **_kwargs):
-        h = Handler(*_args, **_kwargs)
-        h.sampler = sampler
-        return h
-
-    httpd = ThreadingHTTPServer((args.host, args.port), handler_factory)
+    httpd = ThreadingHTTPServer((args.host, args.port), Handler)
 
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
