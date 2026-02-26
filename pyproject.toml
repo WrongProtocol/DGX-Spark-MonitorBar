@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sparkmon"
+version = "0.1.0"
+description = "Spark monitor (agent + tiny desktop bar)"
+requires-python = ">=3.9"
+
+dependencies = [
+  "psutil>=5.9.0",
+  "pynvml>=11.5.0",
+  "requests>=2.31.0",
+]
+
+[project.scripts]
+sparkmon-agent = "sparkmon.agent.__main__:main"
+sparkmon-display = "sparkmon.display.__main__:main"
