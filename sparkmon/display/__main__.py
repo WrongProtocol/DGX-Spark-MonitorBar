@@ -139,7 +139,8 @@ class AgentPane:
             if n is None or v is None:
                 return (f"{prefix}:—", DIM)
             try:
-                return (f"{prefix}:{n} {float(v):.0f}%", FG)
+                vf = float(v)
+                return (f"{prefix}:{n} {vf:.0f}%", color_for_percent(vf))
             except Exception:
                 return (f"{prefix}:{n}", FG)
 
