@@ -10,6 +10,36 @@ import requests
 import tkinter as tk
 
 
+# --- colors / theming ---
+BG = "#111111"
+FG = "#EAEAEA"
+DIM = "#9AA0A6"
+GREEN = "#3DDC84"
+ORANGE = "#FF9F1A"
+YELLOW = "#FFD60A"
+RED = "#FF4D4F"
+
+
+def color_for_percent(v: Optional[float]) -> str:
+    if v is None:
+        return DIM
+    if v < 50:
+        return GREEN
+    if v < 80:
+        return ORANGE
+    return RED
+
+
+def color_for_temp_c(v: Optional[float]) -> str:
+    if v is None:
+        return DIM
+    if v < 70:
+        return GREEN
+    if v < 82:
+        return YELLOW
+    return RED
+
+
 @dataclass
 class AgentTarget:
     name: str
@@ -30,37 +60,124 @@ def parse_agents(spec: str) -> List[AgentTarget]:
     return out
 
 
+class AgentPane:
+    def __init__(self, parent: tk.Widget) -> None:
+        self.frame = tk.Frame(parent, bg=BG)
+
+        font = ("TkDefaultFont", 10)
+        padx = 6
+
+        self.host = tk.Label(self.frame, text="—", fg=FG, bg=BG, font=font, padx=padx)
+        self.cpu = tk.Label(self.frame, text="CPU —", fg=DIM, bg=BG, font=font, padx=padx)
+        self.mem = tk.Label(self.frame, text="MEM —", fg=DIM, bg=BG, font=font, padx=padx)
+        self.gpu = tk.Label(self.frame, text="GPU —", fg=DIM, bg=BG, font=font, padx=padx)
+        self.temp = tk.Label(self.frame, text="T —", fg=DIM, bg=BG, font=font, padx=padx)
+
+        self.top_cpu = tk.Label(self.frame, text="C:—", fg=FG, bg=BG, font=font, padx=padx)
+        self.top_mem = tk.Label(self.frame, text="M:—", fg=FG, bg=BG, font=font, padx=padx)
+        self.top_gpu = tk.Label(self.frame, text="G:—", fg=FG, bg=BG, font=font, padx=padx)
+
+        for w in (self.host, self.cpu, self.mem, self.gpu, self.temp, self.top_cpu, self.top_mem, self.top_gpu):
+            w.pack(side="left")
+
+        # subtle separator
+        self.sep = tk.Frame(self.frame, bg="#222", width=2)
+        self.sep.pack(side="left", fill="y", padx=(4, 4))
+
+    def pack(self, **kwargs) -> None:
+        self.frame.pack(**kwargs)
+
+    def set_offline(self, label: str) -> None:
+        self.host.config(text=label, fg=FG)
+        for w in (self.cpu, self.mem, self.gpu, self.temp):
+            w.config(text="—", fg=DIM)
+        for w in (self.top_cpu, self.top_mem, self.top_gpu):
+            w.config(text="—", fg=DIM)
+
+    def update_from_payload(self, agent: AgentTarget, payload: Dict[str, Any], stale: bool) -> None:
+        host = payload.get("host") or agent.name
+        self.host.config(text=host, fg=FG if not stale else DIM)
+
+        cpu = payload.get("cpu_percent")
+        mem = (payload.get("mem") or {}).get("percent")
+
+        # GPU: show max util/temp across GPUs
+        gpus = payload.get("gpus") or []
+        gpu_util = None
+        gpu_temp = None
+        try:
+            utils = [g.get("utilization_gpu_percent") for g in gpus if g.get("utilization_gpu_percent") is not None]
+            temps = [g.get("temperature_c") for g in gpus if g.get("temperature_c") is not None]
+            gpu_util = max(utils) if utils else None
+            gpu_temp = max(temps) if temps else None
+        except Exception:
+            pass
+
+        if isinstance(cpu, (int, float)):
+            self.cpu.config(text=f"CPU {cpu:.0f}%", fg=color_for_percent(float(cpu)))
+        else:
+            self.cpu.config(text="CPU —", fg=DIM)
+
+        if isinstance(mem, (int, float)):
+            self.mem.config(text=f"MEM {mem:.0f}%", fg=color_for_percent(float(mem)))
+        else:
+            self.mem.config(text="MEM —", fg=DIM)
+
+        if isinstance(gpu_util, (int, float)):
+            self.gpu.config(text=f"GPU {gpu_util:.0f}%", fg=color_for_percent(float(gpu_util)))
+        else:
+            self.gpu.config(text="GPU —", fg=DIM)
+
+        if isinstance(gpu_temp, (int, float)):
+            self.temp.config(text=f"T {gpu_temp:.0f}C", fg=color_for_temp_c(float(gpu_temp)))
+        else:
+            self.temp.config(text="T —", fg=DIM)
+
+        def fmt_top(d: Dict[str, Any], prefix: str) -> Tuple[str, str]:
+            n = d.get("name")
+            v = d.get("value")
+            if n is None or v is None:
+                return (f"{prefix}:—", DIM)
+            try:
+                return (f"{prefix}:{n} {float(v):.0f}%", FG)
+            except Exception:
+                return (f"{prefix}:{n}", FG)
+
+        t = payload.get("top_cpu") or {}
+        text, col = fmt_top(t, "C")
+        self.top_cpu.config(text=text, fg=col)
+
+        t = payload.get("top_mem") or {}
+        text, col = fmt_top(t, "M")
+        self.top_mem.config(text=text, fg=col)
+
+        t = payload.get("top_gpu") or {}
+        text, col = fmt_top(t, "G")
+        self.top_gpu.config(text=text, fg=col)
+
+
 class SparkMonBar:
     def __init__(self, agents: List[AgentTarget], height_px: int = 30) -> None:
         self.agents = agents
         self.height_px = height_px
+
         self.root = tk.Tk()
         self.root.title("sparkmon")
 
-        # frameless
+        # frameless bar
         self.root.overrideredirect(True)
 
         # allow closing via Esc
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
 
-        self.frame = tk.Frame(self.root, bg="#111")
+        self.frame = tk.Frame(self.root, bg=BG)
         self.frame.pack(fill="both", expand=True)
 
-        self.labels: List[tk.Label] = []
+        self.panes: List[AgentPane] = []
         for _ in agents:
-            lbl = tk.Label(
-                self.frame,
-                text="…",
-                fg="#eee",
-                bg="#111",
-                font=("TkDefaultFont", 10),
-                padx=10,
-                pady=0,
-                anchor="w",
-                justify="left",
-            )
-            lbl.pack(side="left", fill="both", expand=True)
-            self.labels.append(lbl)
+            p = AgentPane(self.frame)
+            p.pack(side="left", fill="both", expand=True)
+            self.panes.append(p)
 
         self.data_lock = threading.Lock()
         self.latest: List[Tuple[float, Optional[Dict[str, Any]]]] = [(0.0, None) for _ in agents]
@@ -94,61 +211,17 @@ class SparkMonBar:
                 self.latest[idx] = (time.time(), payload)
             time.sleep(1.0)
 
-    def _fmt_agent(self, agent: AgentTarget, payload: Optional[Dict[str, Any]]) -> str:
-        if not payload:
-            return f"{agent.name}  |  OFFLINE"
-
-        cpu = payload.get("cpu_percent")
-        mem = (payload.get("mem") or {}).get("percent")
-
-        # GPU: show max util/temp across GPUs
-        gpus = payload.get("gpus") or []
-        gpu_util = None
-        gpu_temp = None
-        try:
-            utils = [g.get("utilization_gpu_percent") for g in gpus if g.get("utilization_gpu_percent") is not None]
-            temps = [g.get("temperature_c") for g in gpus if g.get("temperature_c") is not None]
-            gpu_util = max(utils) if utils else None
-            gpu_temp = max(temps) if temps else None
-        except Exception:
-            pass
-
-        top_cpu = payload.get("top_cpu") or {}
-        top_mem = payload.get("top_mem") or {}
-        top_gpu = payload.get("top_gpu") or {}
-
-        def fmt_top(d: Dict[str, Any], label: str) -> str:
-            n = d.get("name")
-            v = d.get("value")
-            if n is None or v is None:
-                return f"{label}:—"
-            try:
-                return f"{label}:{n} {v:.0f}%"
-            except Exception:
-                return f"{label}:{n}"
-
-        parts = [
-            f"{payload.get('host', agent.name)}",
-            f"CPU {cpu:.0f}%" if isinstance(cpu, (int, float)) else "CPU —",
-            f"MEM {mem:.0f}%" if isinstance(mem, (int, float)) else "MEM —",
-            f"GPU {gpu_util:.0f}%" if isinstance(gpu_util, (int, float)) else "GPU —",
-            f"T {gpu_temp:.0f}C" if isinstance(gpu_temp, (int, float)) else "T —",
-            fmt_top(top_cpu, "C"),
-            fmt_top(top_mem, "M"),
-            fmt_top(top_gpu, "G"),
-        ]
-        return "  |  ".join(parts)
-
     def _ui_tick(self) -> None:
         with self.data_lock:
             latest = list(self.latest)
 
+        now = time.time()
         for i, (ts, payload) in enumerate(latest):
-            txt = self._fmt_agent(self.agents[i], payload)
-            # stale indicator
-            if payload and (time.time() - ts) > 2.5:
-                txt = txt + "  |  STALE"
-            self.labels[i].config(text=txt)
+            stale = payload is not None and (now - ts) > 2.5
+            if payload is None:
+                self.panes[i].set_offline(f"{self.agents[i].name} OFFLINE")
+            else:
+                self.panes[i].update_from_payload(self.agents[i], payload, stale=stale)
 
         # re-position in case resolution changes
         self._position_bottom_bar()
