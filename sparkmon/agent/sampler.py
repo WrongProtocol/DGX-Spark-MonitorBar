@@ -11,9 +11,39 @@ import psutil
 from sparkmon.agent.nvml_gpu import NvmlSampler
 
 
-def _proc_name(pid: int) -> Optional[str]:
+def _proc_display_name(pid: int) -> Optional[str]:
+    """Human-friendly process label.
+
+    If the process is Python, try to show the script/module name instead of just "python".
+    Examples:
+      - python /path/to/server.py   -> server.py
+      - python -m http.server       -> http.server
+    """
     try:
         p = psutil.Process(pid)
+        name = (p.name() or "").lower()
+
+        if "python" in name:
+            try:
+                cmd = p.cmdline() or []
+            except Exception:
+                cmd = []
+
+            # cmd[0] is interpreter; find first meaningful arg
+            if len(cmd) >= 2:
+                # module mode
+                if cmd[1] == "-m" and len(cmd) >= 3:
+                    return cmd[2]
+
+                # skip common flags and take first non-flag
+                for arg in cmd[1:]:
+                    if not arg:
+                        continue
+                    if arg.startswith("-"):
+                        continue
+                    return os.path.basename(arg)
+
+        # fallback: actual process name
         return p.name()
     except Exception:
         return None
@@ -82,14 +112,18 @@ class Sampler:
             cpu_pid, cpu_name, cpu_val = (None, None, None)
         else:
             cpu_pid, cpu_name, cpu_val = _top_process_by(lambda p: p.cpu_percent(interval=None))
+            if cpu_pid is not None:
+                cpu_name = _proc_display_name(cpu_pid) or cpu_name
 
         # Top MEM (single-pass)
         mem_pid, mem_name, mem_val = _top_process_by(lambda p: p.memory_percent())
+        if mem_pid is not None:
+            mem_name = _proc_display_name(mem_pid) or mem_name
 
         top_gpu = self.nvml.top_gpu_process(sample_window_ms=int(self.config.top_every_s * 1000))
         if top_gpu and top_gpu.get("pid") is not None:
             gp_pid = int(top_gpu["pid"])
-            gp_name = _proc_name(gp_pid)
+            gp_name = _proc_display_name(gp_pid)
             gp_val = float(top_gpu.get("utilization_gpu_percent")) if top_gpu.get("utilization_gpu_percent") is not None else None
         else:
             gp_pid, gp_name, gp_val = None, None, None
