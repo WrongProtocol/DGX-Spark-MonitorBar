@@ -133,11 +133,14 @@ class AgentPane:
         else:
             self.temp.config(text="T —", fg=DIM)
 
-        def fmt_top(d: Dict[str, Any], prefix: str) -> Tuple[str, str]:
+        def fmt_top(d: Dict[str, Any], prefix: str, max_name: int = 10) -> Tuple[str, str]:
             n = d.get("name")
             v = d.get("value")
             if n is None or v is None:
                 return (f"{prefix}:—", DIM)
+            # Truncate long process names to fit 3-pane layout
+            if len(n) > max_name:
+                n = n[:max_name - 1] + "…"
             try:
                 vf = float(v)
                 return (f"{prefix}:{n} {vf:.0f}%", color_for_percent(vf))
@@ -244,7 +247,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="sparkmon-display")
     ap.add_argument(
         "--agents",
-        default="spark-9429:9000,spark-1914:9000",
+        default="spark-9429:9000,spark-1914:9000,spark-edc4:9000",
         help="Comma-separated host:port or full URLs",
     )
     ap.add_argument("--height", type=int, default=30)
