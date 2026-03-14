@@ -46,6 +46,24 @@ class AgentTarget:
     url: str
 
 
+def _short_host(label: str) -> str:
+    """Compress host labels for tight horizontal space.
+
+    Examples:
+      - spark-9429 -> 9429
+      - spark-edc4 -> edc4
+      - spark-1914:9000 -> 1914
+      - http://spark-9429:9000 -> 9429
+    """
+    s = (label or "").strip()
+    s = s.replace("http://", "").replace("https://", "")
+    s = s.split("/")[0]
+    s = s.split(":")[0]
+    if s.startswith("spark-"):
+        s = s[len("spark-"):]
+    return s or "—"
+
+
 def parse_agents(spec: str) -> List[AgentTarget]:
     out: List[AgentTarget] = []
     for part in [p.strip() for p in spec.split(",") if p.strip()]:
@@ -95,7 +113,7 @@ class AgentPane:
             w.config(text="—", fg=DIM)
 
     def update_from_payload(self, agent: AgentTarget, payload: Dict[str, Any], stale: bool) -> None:
-        host = payload.get("host") or agent.name
+        host = _short_host(payload.get("host") or agent.name)
         self.host.config(text=host, fg=FG if not stale else DIM)
 
         cpu = payload.get("cpu_percent")
@@ -228,7 +246,7 @@ class SparkMonBar:
         for i, (ts, payload) in enumerate(latest):
             stale = payload is not None and (now - ts) > 2.5
             if payload is None:
-                self.panes[i].set_offline(f"{self.agents[i].name} OFFLINE")
+                self.panes[i].set_offline(f"{_short_host(self.agents[i].name)} OFFLINE")
             else:
                 self.panes[i].update_from_payload(self.agents[i], payload, stale=stale)
 
