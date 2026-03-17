@@ -37,3 +37,5 @@ python -m sparkmon.display --agents spark-9429:9000,spark-1914:9000
 
 - GPU stats are best-effort via NVML (pynvml). If NVML is unavailable, GPU fields return `null`.
 - “Top GPU process” is computed via NVML per-process utilization samples when supported; otherwise it may be `null`.
+- This is designed to fit across the bottom of a 1920x1080 and accommodate the information of 3 spark boxes. However, modification is pretty simple.
+- If the name of each spark box begins with "spark-" the it will be truncated to just the suffix code. i.e. spark-9429 becomes 9429. 
